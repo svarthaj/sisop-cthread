@@ -2,23 +2,10 @@
 #include <stdio.h>
 #include <ucontext.h>
 #include "support.h"
+#include "cdata.h"
 #include "cthread.h"
 
 #define VERBOSE 1
-
-#define ST_CREATION 0
-#define ST_APT 1
-#define ST_RUNNING 2
-#define ST_BLOCKED 3
-#define ST_ENDED 4
-
-typedef struct s_TCB {
-    int tid;
-    int state;
-
-    int ticket;
-    ucontext_t context;
-} TCB_t;
 
 /***** catalogging */
 
@@ -42,7 +29,7 @@ static TCB_t TCB_init(int tid) {
     char *stack = malloc(1024*sizeof(char));
 
     thr.tid = tid;
-    thr.state = ST_APT;
+    thr.state = PROCST_APTO;
     thr.ticket = tid;
     getcontext(&(thr.context));
     thr.context.uc_stack.ss_sp = stack;
