@@ -1,30 +1,103 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ucontext.h>
+#include "logging.c"
 #include "support.h"
 #include "cdata.h"
 #include "cthread.h"
 
-#define VERBOSE 1
+#undef LOGLEVEL
+#define LOGLEVEL 5
+
+#define MAXTHREADS 50
+
+FILA2 apts_q;
+PFILA2 papts_q;
+TCB_t *getTCB(int tid);
+
+/***** utils */
+
+/* logs a TCB */
+static void printTCB(TCB_t thr) {
+    const char *state[5] = {"creation", "apt", "executing", "blocked", "ended"};
+    char info[1024];
+    sprintf(info, "tid: %d - state: %s - ticket: %d \n",
+            thr.tid, state[thr.state], thr.ticket);
+    loginfo((const char *)info);
+}
+
+static void printApts() {
+    TCB_t *tcb_p;
+
+    logdebug("apts queue:\n");
+    FirstFila2(papts_q);
+    while((tcb_p = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
+        flogdebug("- %d\n", tcb_p->tid);
+        NextFila2(papts_q);
+    }
+}
+
+static void printTCB_tid(int tid) {
+    TCB_t *thr = getTCB(tid);
+    printTCB(*thr);
+}
+
+
+
 
 /***** catalogging */
 
 /* temporary TCB 'tree' */
-static TCB_t threads[50];
+static TCB_t threads[MAXTHREADS];
+static char valid_threads[MAXTHREADS];
+static int executing_now;
 
-TCB_t getTCB(int tid) {
-    return threads[tid];
+/* initializes the whole thread system. shouldn't be called more than
+   once */
+void initAll(void) {
+    loginfo("initializing everything\n");
+    int i;
+    for (i = 0; i < MAXTHREADS; i++) valid_threads[i] = 0;
+
+    loginfo("creating apt queue\n");
+    papts_q = &apts_q;
+    CreateFila2(papts_q);
+
+    loginfo("setting main to executing: \n");
+    executing_now = 0;
 }
 
-/* put 'tcb' in catalog */
+/* return a pointer to the TCB with that tid */
+TCB_t *getTCB(int tid) {
+    if (tid > MAXTHREADS || !valid_threads[tid]) {
+        flogerror("Tried to access invalid thread %d\n", tid);
+    }
+
+    return threads + tid;
+}
+
+/* put tcb in catalog */
 static void keepTCB(TCB_t tcb) {
+    floginfo("keeping TCB %d\n", tcb.tid);
+    printTCB(tcb);
     threads[tcb.tid] = tcb;
+    valid_threads[tcb.tid] = 1;
 }
 
-/***** TCB manipulation and utils */
+static void addToApts(int tid) {
+    floginfo("adding %d to apts\n", tid);
+    AppendFila2(papts_q, getTCB(tid));
+    printApts();
+}
+
+
+
+
+/***** TCB manipulation */
 
 /* return initialized TCB, insert it to the TCB "catalog" */
 static TCB_t TCB_init(int tid) {
+    floginfo("initializing TCB %d\n", tid);
     TCB_t thr;
     char *stack = malloc(1024*sizeof(char));
 
@@ -40,37 +113,42 @@ static TCB_t TCB_init(int tid) {
     return thr;
 }
 
-static void printTCB(int tid) {
-    if (VERBOSE) {
-        TCB_t thr = getTCB(tid);
-        const char *state[5] = {"creation", "apt", "executing", "blocked", "ended"};
-        printf("tid: %d\n", thr.tid);
-        printf("state: %s\n", state[thr.state]);
-        printf("ticket: %d\n", thr.ticket);
-    }
-}
+
+
 
 /***** interface */
 
+/* create thread */
 int ccreate (void* (*start)(void*), void *arg) {
     static last_tid = -1;
 
     /* check for main */
     if (last_tid == -1) {
+        initAll();
+        floginfo("creating thread %d.\n", last_tid + 1);
+
         TCB_t main;
 
         main = TCB_init(++last_tid);
+        main.state = PROCST_EXEC;
         main.context.uc_link = NULL;
 
-        printTCB(main.tid);
+        addToApts(main.tid);
+
+        floginfo("created thread %d.\n", main.tid);
+        printTCB(main);
     }
+
+    floginfo("creating thread %d.\n", last_tid + 1);
 
     TCB_t thr;
 
     thr = TCB_init(++last_tid);
     //thr.context.uc_link = /* to dispatcher */
-    printTCB(thr.tid);
+    addToApts(thr.tid);
 
+    floginfo("created thread %d.\n", thr.tid);
+    printTCB(thr);
     return 0;
 }
 
