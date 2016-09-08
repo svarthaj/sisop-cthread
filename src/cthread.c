@@ -21,7 +21,7 @@ TCB_t *getTCB(int tid);
 static void printTCB(TCB_t thr) {
     const char *state[5] = {"creation", "apt", "executing", "blocked", "ended"};
     char info[1024];
-    sprintf(info, "tid: %d - state: %s - ticket: %d \n",
+    sprintf(info, "tid: %d - state: %s - ticket: %d ",
             thr.tid, state[thr.state], thr.ticket);
     loginfo((const char *)info);
 }
@@ -29,10 +29,10 @@ static void printTCB(TCB_t thr) {
 static void printApts() {
     TCB_t *tcb_p;
 
-    logdebug("apts queue:\n");
+    logdebug("apts queue:");
     FirstFila2(papts_q);
     while((tcb_p = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
-        flogdebug("- %d\n", tcb_p->tid);
+        flogdebug("- %d", tcb_p->tid);
         NextFila2(papts_q);
     }
 }
@@ -55,22 +55,22 @@ static int executing_now;
 /* initializes the whole thread system. shouldn't be called more than
    once */
 void initAll(void) {
-    loginfo("initializing everything\n");
+    loginfo("initializing everything");
     int i;
     for (i = 0; i < MAXTHREADS; i++) valid_threads[i] = 0;
 
-    loginfo("creating apt queue\n");
+    loginfo("creating apt queue");
     papts_q = &apts_q;
     CreateFila2(papts_q);
 
-    loginfo("setting main to executing: \n");
+    loginfo("setting main to executing: ");
     executing_now = 0;
 }
 
 /* return a pointer to the TCB with that tid */
 TCB_t *getTCB(int tid) {
     if (tid > MAXTHREADS || !valid_threads[tid]) {
-        flogerror("Tried to access invalid thread %d\n", tid);
+        flogerror("Tried to access invalid thread %d", tid);
     }
 
     return threads + tid;
@@ -78,14 +78,14 @@ TCB_t *getTCB(int tid) {
 
 /* put tcb in catalog */
 static void keepTCB(TCB_t tcb) {
-    floginfo("keeping TCB %d\n", tcb.tid);
+    floginfo("keeping TCB %d", tcb.tid);
     printTCB(tcb);
     threads[tcb.tid] = tcb;
     valid_threads[tcb.tid] = 1;
 }
 
 static void addToApts(int tid) {
-    floginfo("adding %d to apts\n", tid);
+    floginfo("adding %d to apts", tid);
     AppendFila2(papts_q, getTCB(tid));
     printApts();
 }
@@ -97,7 +97,7 @@ static void addToApts(int tid) {
 
 /* return initialized TCB, insert it to the TCB "catalog" */
 static TCB_t TCB_init(int tid) {
-    floginfo("initializing TCB %d\n", tid);
+    floginfo("initializing TCB %d", tid);
     TCB_t thr;
     char *stack = malloc(1024*sizeof(char));
 
@@ -125,7 +125,7 @@ int ccreate (void* (*start)(void*), void *arg) {
     /* check for main */
     if (last_tid == -1) {
         initAll();
-        floginfo("creating thread %d.\n", last_tid + 1);
+        floginfo("creating thread %d.", last_tid + 1);
 
         TCB_t main;
 
@@ -135,11 +135,11 @@ int ccreate (void* (*start)(void*), void *arg) {
 
         addToApts(main.tid);
 
-        floginfo("created thread %d.\n", main.tid);
+        floginfo("created thread %d.", main.tid);
         printTCB(main);
     }
 
-    floginfo("creating thread %d.\n", last_tid + 1);
+    floginfo("creating thread %d.", last_tid + 1);
 
     TCB_t thr;
 
@@ -147,7 +147,7 @@ int ccreate (void* (*start)(void*), void *arg) {
     //thr.context.uc_link = /* to dispatcher */
     addToApts(thr.tid);
 
-    floginfo("created thread %d.\n", thr.tid);
+    floginfo("created thread %d.", thr.tid);
     printTCB(thr);
     return 0;
 }
