@@ -29,10 +29,10 @@ static void printTCB(TCB_t thr) {
 static void printApts() {
     TCB_t *tcb_p;
 
-    logdebug("apts queue:");
+    loginfo("apts queue:");
     FirstFila2(papts_q);
     while((tcb_p = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
-        flogdebug("- %d", tcb_p->tid);
+        floginfo("- %d", tcb_p->tid);
         NextFila2(papts_q);
     }
 }
@@ -48,7 +48,7 @@ static void printTCB_tid(int tid) {
 /***** catalogging */
 
 /* temporary TCB 'tree' */
-static TCB_t threads[MAXTHREADS];
+static TCB_t *threads[MAXTHREADS];
 static char valid_threads[MAXTHREADS];
 static int executing_now;
 
@@ -73,15 +73,22 @@ TCB_t *getTCB(int tid) {
         flogerror("Tried to access invalid thread %d", tid);
     }
 
-    return threads + tid;
+    return threads[tid];
 }
 
 /* put tcb in catalog */
-static void keepTCB(TCB_t tcb) {
-    floginfo("keeping TCB %d", tcb.tid);
-    printTCB(tcb);
-    threads[tcb.tid] = tcb;
-    valid_threads[tcb.tid] = 1;
+static void keepTCB(TCB_t *tcb) {
+    floginfo("keeping TCB %d", tcb->tid);
+    printTCB(*tcb);
+
+    if (valid_threads[tcb->tid] == 1) {
+        floginfo("replacing TCB %d", tcb->tid);
+        free(tcb->context.uc_stack.ss_sp);
+        free(threads[tcb->tid]);
+    }
+
+    valid_threads[tcb->tid] = 1;
+    threads[tcb->tid] = tcb;
 }
 
 static void addToApts(int tid) {
@@ -96,17 +103,17 @@ static void addToApts(int tid) {
 /***** TCB manipulation */
 
 /* return initialized TCB, insert it to the TCB "catalog" */
-static TCB_t TCB_init(int tid) {
+static TCB_t *TCB_init(int tid) {
     floginfo("initializing TCB %d", tid);
-    TCB_t thr;
-    char *stack = malloc(1024*sizeof(char));
+    TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
+    char *stack = (char *)malloc(1024*sizeof(char));
 
-    thr.tid = tid;
-    thr.state = PROCST_APTO;
-    thr.ticket = tid;
-    getcontext(&(thr.context));
-    thr.context.uc_stack.ss_sp = stack;
-    thr.context.uc_stack.ss_size = sizeof(stack);
+    thr->tid = tid;
+    thr->state = PROCST_APTO;
+    thr->ticket = tid;
+    getcontext(&(thr->context));
+    thr->context.uc_stack.ss_sp = stack;
+    thr->context.uc_stack.ss_size = sizeof(stack);
 
     keepTCB(thr); /* insert in catalog */
 
@@ -127,28 +134,27 @@ int ccreate (void* (*start)(void*), void *arg) {
         initAll();
         floginfo("creating thread %d.", last_tid + 1);
 
-        TCB_t main;
+        TCB_t *main;
 
         main = TCB_init(++last_tid);
-        main.state = PROCST_EXEC;
-        main.context.uc_link = NULL;
+        main->state = PROCST_EXEC;
+        main->context.uc_link = NULL;
 
-        addToApts(main.tid);
-
-        floginfo("created thread %d.", main.tid);
-        printTCB(main);
+        floginfo("created thread %d.", main->tid);
+        printTCB(*main);
     }
 
     floginfo("creating thread %d.", last_tid + 1);
 
-    TCB_t thr;
+    TCB_t *thr;
 
     thr = TCB_init(++last_tid);
-    //thr.context.uc_link = /* to dispatcher */
-    addToApts(thr.tid);
+    //makecontext(&(thr->context), start, 1, arg);
+    //thr.context.uc_link = /* to pre-dispatcher */
+    addToApts(thr->tid);
 
-    floginfo("created thread %d.", thr.tid);
-    printTCB(thr);
+    floginfo("created thread %d.", thr->tid);
+    printTCB(*thr);
     return 0;
 }
 
