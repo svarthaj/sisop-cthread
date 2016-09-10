@@ -91,10 +91,52 @@ static void keepTCB(TCB_t *tcb) {
     threads[tcb->tid] = tcb;
 }
 
+/* find and return the address of the TCB with tid closest to the one given.
+   if two tids are equaly close, returns the smallest of them. should never
+   return NULL, for at least the main thread exist. */
+static TCB_t *getClosestTCB(int tid) {
+    int r = 0; /* radius */
+    int i = tid;
+    TCB_t *tcb = NULL;
+
+    while (tcb == NULL) {
+        int minor, major;
+        /* watch for limits */
+        minor = (i - r < 0) ? 0 : i - r;
+        major = (i + r > MAXTHREADS) ? MAXTHREADS : i + r;
+
+        /* smaller has preference */
+        if (valid_threads[minor]) {
+            tcb = getTCB(minor);
+        } else if (valid_threads[major]) {
+            tcb = getTCB(major);
+        }
+
+        r++;
+    }
+
+    return tcb;
+}
+
 static void addToApts(int tid) {
     floginfo("adding %d to apts", tid);
     AppendFila2(papts_q, getTCB(tid));
     printApts();
+}
+
+static void removeFromApts(int tid) {
+    floginfo("removing %d from apts", tid);
+    FirstFila2(papts_q);
+
+    TCB_t *curr; /* current */
+    while ((curr = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
+        if (curr->tid == tid) {
+            DeleteAtIteratorFila2(papts_q);
+            break;
+        } else {
+            NextFila2(papts_q);
+        }
+    }
 }
 
 
@@ -106,18 +148,42 @@ static void addToApts(int tid) {
 static TCB_t *TCB_init(int tid) {
     floginfo("initializing TCB %d", tid);
     TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
-    char *stack = (char *)malloc(1024*sizeof(char));
+    int ss_size = 1234*sizeof(char);
+    char *stack = (char *)malloc(ss_size);
 
     thr->tid = tid;
     thr->state = PROCST_APTO;
     thr->ticket = tid;
-    getcontext(&(thr->context));
+    flogdebug("initializing context at address %p", &(thr->context));
+    if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
+    flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
     thr->context.uc_stack.ss_sp = stack;
-    thr->context.uc_stack.ss_size = sizeof(stack);
+    thr->context.uc_stack.ss_size = ss_size;
 
     keepTCB(thr); /* insert in catalog */
 
     return thr;
+}
+
+static void run_thread(void *(*start)(void *), void *arg) {
+    loginfo("in call start");
+    flogdebug("thread %d is executing", executing_now);
+    start(arg);
+}
+
+static void dispatcher(void) {
+    int lucky = Random2()%MAXTHREADS;
+    floginfo("closest to %d will be selected for dispatch", lucky);
+    TCB_t *tcb = getClosestTCB(lucky);
+    removeFromApts(tcb->tid);
+    executing_now = tcb->tid;
+    floginfo("dispatching %d", tcb->tid);
+    flogdebug("setting context at address %p", &(tcb->context));
+    setcontext(&(tcb->context));
+}
+
+static void say_hey(void) {
+    loginfo("hey");
 }
 
 
@@ -149,8 +215,16 @@ int ccreate (void* (*start)(void*), void *arg) {
     TCB_t *thr;
 
     thr = TCB_init(++last_tid);
-    //makecontext(&(thr->context), start, 1, arg);
-    //thr.context.uc_link = /* to pre-dispatcher */
+    //makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
+    logdebug("**prematurely setting context just for testing the segfault");
+    logdebug("this shall be removed and left to the dispatcher later**");
+    flogdebug("making context at address %p", &(thr->context));
+    logdebug("calling: makecontext(&(thr->context), say_hey, 0);");
+    makecontext(&(thr->context), say_hey, 0);
+    flogdebug("setting context at address %p", &(thr->context));
+    logdebug("calling: setcontext(&(thr->context))");
+    setcontext(&(thr->context));
+    thr->context.uc_link = NULL; /* to pre-dispatcher */
     addToApts(thr->tid);
 
     floginfo("created thread %d.", thr->tid);
@@ -159,7 +233,20 @@ int ccreate (void* (*start)(void*), void *arg) {
 }
 
 int cyield(void) {
-    return -1;
+    int been_here = 0;
+    TCB_t *caller;
+    caller = getTCB(executing_now);
+    floginfo("thread %d is yielding control", caller->tid);
+    getcontext(&(caller->context));
+
+    if (!been_here) {
+        been_here = 1;
+        caller->state = PROCST_APTO;
+        addToApts(caller->tid);
+
+        dispatcher();
+    }
+    return 0;
 }
 
 int cjoin(int tid) {
