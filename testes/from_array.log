@@ -1,0 +1,25 @@
+INFO:     initializing everything
+INFO:     creating apt queue
+INFO:     setting maint to executing: 
+INFO:     creating thread 0.
+INFO:     initializing TCB 0
+DEBUG:    initializing context at address 0x820a014
+DEBUG:    stack pointer is 0x820a178 and stack size is 1234
+INFO:     keeping TCB 0
+INFO:     tid: 0 - state: apt - ticket: 0 
+INFO:     created thread 0.
+INFO:     tid: 0 - state: executing - ticket: 0 
+INFO:     creating thread 1.
+INFO:     initializing TCB 1
+DEBUG:    initializing context at address 0x820a65c
+DEBUG:    stack pointer is 0x820a7c0 and stack size is 1234
+INFO:     keeping TCB 1
+INFO:     tid: 1 - state: apt - ticket: 1 
+DEBUG:    **prematurely setting context just for testing the segfault
+DEBUG:    this shall be removed and left to the dispatcher later**
+DEBUG:    making context at address 0x820a65c
+DEBUG:    calling: makecontext(&(thr->context), say_hey, 0);
+DEBUG:    setting context at address 0x820a65c
+DEBUG:    calling: setcontext(&(thr->context))
+INFO:     hey
+DEBUG:    came back from setcontext
