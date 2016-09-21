@@ -11,6 +11,9 @@
 
 #define MAXTHREADS 50
 
+ucontext_t m;
+int been_here;
+
 FILA2 apts_q;
 PFILA2 papts_q;
 TCB_t *getTCB(int tid);
@@ -63,7 +66,7 @@ void initAll(void) {
     papts_q = &apts_q;
     CreateFila2(papts_q);
 
-    loginfo("setting main to executing: ");
+    loginfo("setting maint to executing: ");
     executing_now = 0;
 }
 
@@ -93,7 +96,7 @@ static void keepTCB(TCB_t *tcb) {
 
 /* find and return the address of the TCB with tid closest to the one given.
    if two tids are equaly close, returns the smallest of them. should never
-   return NULL, for at least the main thread exist. */
+   return NULL, for at least the maint thread exist. */
 static TCB_t *getClosestTCB(int tid) {
     int r = 0; /* radius */
     int i = tid;
@@ -157,6 +160,7 @@ static TCB_t *TCB_init(int tid) {
     flogdebug("initializing context at address %p", &(thr->context));
     if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
+	thr->context.uc_link = &m;
     thr->context.uc_stack.ss_sp = stack;
     thr->context.uc_stack.ss_size = ss_size;
 
@@ -183,6 +187,7 @@ static void dispatcher(void) {
 }
 
 static void say_hey(void) {
+	been_here = 1;
     loginfo("hey");
 }
 
@@ -193,38 +198,67 @@ static void say_hey(void) {
 
 /* create thread */
 int ccreate (void* (*start)(void*), void *arg) {
-    static last_tid = -1;
+    static int last_tid = -1;
 
-    /* check for main */
+    /* check for maint */
     if (last_tid == -1) {
         initAll();
         floginfo("creating thread %d.", last_tid + 1);
 
-        TCB_t *main;
+        TCB_t *maint;
 
-        main = TCB_init(++last_tid);
-        main->state = PROCST_EXEC;
-        main->context.uc_link = NULL;
+        maint = TCB_init(++last_tid);
+        maint->state = PROCST_EXEC;
+        maint->context.uc_link = NULL;
 
-        floginfo("created thread %d.", main->tid);
-        printTCB(*main);
+        floginfo("created thread %d.", maint->tid);
+        printTCB(*maint);
     }
 
     floginfo("creating thread %d.", last_tid + 1);
 
+//	char cstack[1024];
+	char *cstack = (char *)malloc(1024);
     TCB_t *thr;
-
     thr = TCB_init(++last_tid);
-    //makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
-    logdebug("**prematurely setting context just for testing the segfault");
-    logdebug("this shall be removed and left to the dispatcher later**");
-    flogdebug("making context at address %p", &(thr->context));
-    logdebug("calling: makecontext(&(thr->context), say_hey, 0);");
-    makecontext(&(thr->context), say_hey, 0);
-    flogdebug("setting context at address %p", &(thr->context));
-    logdebug("calling: setcontext(&(thr->context))");
-    setcontext(&(thr->context));
-    thr->context.uc_link = NULL; /* to pre-dispatcher */
+	thr->context.uc_stack.ss_sp = cstack;
+//	thr->context.uc_stack.ss_sp = malloc(1024);
+	thr->context.uc_stack.ss_size = 1024;
+
+//	ucontext_t c;
+//	c.uc_link = &m;
+//	c.uc_stack.ss_sp = cstack;
+//	c.uc_stack.ss_size = sizeof(cstack);
+
+	been_here = 0;
+	getcontext(&m);
+
+//	if (!been_here) {
+//		logdebug("getting test context");
+//		getcontext(&c);
+//		logdebug("making test context");
+//		makecontext(&c, say_hey, 0);
+//		logdebug("setting test context");
+//		setcontext(&c);
+//	}
+//	logdebug("came back from setcontext");
+
+	if (!been_here) {
+		//makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
+		logdebug("**prematurely setting context just for testing the segfault");
+		logdebug("this shall be removed and left to the dispatcher later**");
+		flogdebug("making context at address %p", &(thr->context));
+		logdebug("calling: makecontext(&(thr->context), say_hey, 0);");
+		makecontext(&(thr->context), say_hey, 0);
+		flogdebug("setting context at address %p", &(thr->context));
+		logdebug("calling: setcontext(&(thr->context))");
+		setcontext(&(thr->context));
+	}
+	logdebug("came back from setcontext");
+
+	exit(0);
+
+    //thr->context.uc_link = NULL; /* to pre-dispatcher */
     addToApts(thr->tid);
 
     floginfo("created thread %d.", thr->tid);
