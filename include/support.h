@@ -9,6 +9,11 @@
 #ifndef	__SUPPORTE_H__
 #define	__SUPPORTE_H__
 
+struct waitp {
+    int caller;
+    int target;
+};
+
 struct	sFilaNode2 {
 	void 	*node;			// Ponteiro para a estrutura de dados do NODO
 	struct	sFilaNode2 *ant;	// Ponteiro para o nodo anterior
@@ -20,6 +25,7 @@ struct sFila2 {
 	struct	sFilaNode2 *last;	// Último elemento da lista
 };
 
+typedef struct waitp        WAITPAIR;
 typedef struct sFilaNode2	NODE2;
 typedef struct sFila2		FILA2;
 typedef struct sFilaNode2 *	PNODE2;
