@@ -10,6 +10,7 @@
 #define LOGLEVEL 5
 
 #define MAXTHREADS 50
+#define THR_STACKSZ 50*1024
 
 FILA2 apts_q;
 PFILA2 papts_q;
@@ -148,7 +149,7 @@ static void removeFromApts(int tid) {
 static TCB_t *TCB_init(int tid) {
     floginfo("initializing TCB %d", tid);
     TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
-    int ss_size = 1234*sizeof(char);
+    int ss_size = THR_STACKSZ;
     char *stack = (char *)malloc(ss_size);
 
     thr->tid = tid;
@@ -182,10 +183,6 @@ static void dispatcher(void) {
     setcontext(&(tcb->context));
 }
 
-static void say_hey(void) {
-    loginfo("hey");
-}
-
 
 
 
@@ -215,15 +212,7 @@ int ccreate (void* (*start)(void*), void *arg) {
     TCB_t *thr;
 
     thr = TCB_init(++last_tid);
-    //makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
-    logdebug("**prematurely setting context just for testing the segfault");
-    logdebug("this shall be removed and left to the dispatcher later**");
-    flogdebug("making context at address %p", &(thr->context));
-    logdebug("calling: makecontext(&(thr->context), say_hey, 0);");
-    makecontext(&(thr->context), say_hey, 0);
-    flogdebug("setting context at address %p", &(thr->context));
-    logdebug("calling: setcontext(&(thr->context))");
-    setcontext(&(thr->context));
+    makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
     thr->context.uc_link = NULL; /* to pre-dispatcher */
     addToApts(thr->tid);
 
