@@ -191,17 +191,7 @@ static void dispatcher(void) {
 
 /* create thread */
 int ccreate (void* (*start)(void*), void *arg) {
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-	Random2();
-    static last_tid = -1;
+    static int last_tid = -1;
 
     /* check for main */
     if (last_tid == -1) {
@@ -254,17 +244,43 @@ int cjoin(int tid) {
 }
 
 int csem_init(csem_t *sem, int count) {
-    return -1;
+    FILA2 bloq;
+    PFILA2 pBloq = &bloq; // ponteiro para fila de TCB bloqueadas
+
+    if(CreateFila2(pBloq) != 0) {
+        ("Failed to create pBloq");
+        return -1;
+    }
+
+    sem->count = count;
+    sem->fila = pBloq;
+
+    return 0;
 }
 
 int cwait(csem_t *sem) {
-    return -1;
+    if(sem->count <= 0) {
+        // como acessar a TCB que chamou o cwait?
+        // altera status da TCB=3
+        // adiciona TCB a sem->fila
+    }
+    sem->count--;
 }
 
 int csignal(csem_t *sem) {
-    return -1;
-}
+    sem->count++;
 
-int cidentify (char *name, int size) {
+    // acessa o primeiro da fila de bloqueados
+    FirstFila2( sem->fila );
+    TCB_t  *unblocked_tcb;
+
+    if( unblocked_tcb = (TCB_t*)GetAtIteratorFila2( sem->fila )){
+        DeleteAtIteratorFila2( sem->fila ); // remove primeiro bloqueado
+        unblocked_tcb->state = 1; // muda status para apto
+        AppendFila2( papts_q, unblocked_tcb ); // acrescenta em aptos
+
+        return 0;
+    }
+
     return -1;
 }
