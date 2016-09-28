@@ -10,6 +10,7 @@
 #define LOGLEVEL 5
 
 #define MAXTHREADS 50
+#define MAXTICKET 255
 #define THR_STACKSZ 50*1024
 
 FILA2 apts_q;
@@ -33,7 +34,7 @@ static void printApts() {
     loginfo("apts queue:");
     FirstFila2(papts_q);
     while((tcb_p = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
-        floginfo("- %d", tcb_p->tid);
+		printTCB(*tcb_p);
         NextFila2(papts_q);
     }
 }
@@ -92,31 +93,32 @@ static void keepTCB(TCB_t *tcb) {
     threads[tcb->tid] = tcb;
 }
 
-/* find and return the address of the TCB with tid closest to the one given.
-   if two tids are equaly close, returns the smallest of them. should never
-   return NULL, for at least the main thread exist. */
-static TCB_t *getClosestTCB(int tid) {
-    int r = 0; /* radius */
-    int i = tid;
-    TCB_t *tcb = NULL;
+/* find and return the address of the TCB with ticket closest to the one given.
+   if two tickets are equaly close, return the TCB with the smallest tid.
+   should never return NULL, for at least the main thread exist. */
+static TCB_t *getClosestTCB(int ticket) {
+	floginfo("selecting thread by ticket. lucky number: %d", ticket);
 
-    while (tcb == NULL) {
-        int minor, major;
-        /* watch for limits */
-        minor = (i - r < 0) ? 0 : i - r;
-        major = (i + r > MAXTHREADS) ? MAXTHREADS : i + r;
+	int closest = MAXTICKET + 1;
+	TCB_t *chosen = NULL;
+	TCB_t *it;
+	FirstFila2(papts_q);
+	while ((it = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
+		int curr_dst = abs(it->ticket - ticket);
+		if (curr_dst < closest) {
+			flogdebug("closest is now ticket %d", it->ticket);
+			chosen = it;
+			closest = curr_dst;
+		} else if (curr_dst == closest) {
+			chosen = (chosen->tid < it->tid) ? chosen : it;
+		}
 
-        /* smaller has preference */
-        if (valid_threads[minor]) {
-            tcb = getTCB(minor);
-        } else if (valid_threads[major]) {
-            tcb = getTCB(major);
-        }
-
-        r++;
+		NextFila2(papts_q);
     }
 
-    return tcb;
+	floginfo("closest was thread %d with ticket %d", chosen->tid, chosen->ticket);
+
+    return chosen;
 }
 
 static void addToApts(int tid) {
@@ -154,7 +156,7 @@ static TCB_t *TCB_init(int tid) {
 
     thr->tid = tid;
     thr->state = PROCST_APTO;
-    thr->ticket = tid;
+    thr->ticket = Random2()%MAXTICKET;
     flogdebug("initializing context at address %p", &(thr->context));
     if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
@@ -173,8 +175,7 @@ static void run_thread(void *(*start)(void *), void *arg) {
 }
 
 static void dispatcher(void) {
-    int lucky = Random2()%MAXTHREADS;
-    floginfo("closest to %d will be selected for dispatch", lucky);
+    int lucky = Random2()%MAXTICKET;
     TCB_t *tcb = getClosestTCB(lucky);
     removeFromApts(tcb->tid);
     executing_now = tcb->tid;
@@ -190,6 +191,16 @@ static void dispatcher(void) {
 
 /* create thread */
 int ccreate (void* (*start)(void*), void *arg) {
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
+	Random2();
     static last_tid = -1;
 
     /* check for main */
