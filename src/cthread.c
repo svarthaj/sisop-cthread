@@ -223,6 +223,8 @@ WAITPAIR *getWaitPair(int tid, PFILA2 pairq) {
             NextFila2(pairq);
         }
     }
+    
+    return NULL;
 }
 
 /***** TCB manipulation */
@@ -231,8 +233,8 @@ WAITPAIR *getWaitPair(int tid, PFILA2 pairq) {
 static TCB_t *TCB_init(int tid) {
     floginfo("initializing TCB %d", tid);
     TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
-    int ss_size = 1234*sizeof(char);
-    char *stack = (char *)malloc(ss_size);
+    int ss_size = SIGSTKSZ;
+    char stack[ss_size];
 
     thr->tid = tid;
     thr->state = PROCST_APTO;
@@ -276,7 +278,7 @@ static void terminate(int tid) {
     
     WAITPAIR *curr;
     // search waitpair queue for thread that is terminating
-    if( (curr = getWaitPair(tid, pwaitpair)) ) {    
+    if( (curr = getWaitPair(tid, pwaitpair)) != NULL ) {    
         int caller_tid;
         TCB_t *caller;
         
@@ -311,42 +313,64 @@ int ccreate (void* (*start)(void*), void *arg) {
     static int last_tid = -1;
 
     /* check for main */
+    TCB_t *main_t;
     if (last_tid == -1) {
         initAll();
         floginfo("creating thread %d.", last_tid + 1);
 
-        TCB_t *main_t;
+        int tid = ++last_tid;
+        floginfo("initializing TCB %d", tid);
+        main_t = (TCB_t *)malloc(sizeof(TCB_t));
+        int ss_size = SIGSTKSZ;
+        //char stack[ss_size];
 
-        main_t = TCB_init(++last_tid);
+        main_t->tid = tid;
+        main_t->state = PROCST_APTO;
+        main_t->ticket = tid;
+        flogdebug("initializing context at address %p", &(main_t->context));
+        if (getcontext(&(main_t->context)) == -1) logerror("error initializing context");
+        main_t->context.uc_stack.ss_sp = (char*)malloc(SIGSTKSZ);
+        main_t->context.uc_stack.ss_size = SIGSTKSZ;
+        flogdebug("stack pointer is %p and stack size is %d", main_t->context.uc_stack.ss_sp, main_t->context.uc_stack.ss_size);
+        
         main_t->state = PROCST_EXEC;
         main_t->context.uc_link = NULL;
 
+        keepTCB(main_t); /* insert in catalog */
+        
         floginfo("created thread %d.", main_t->tid);
         printTCB(*main_t);
     }
 
     floginfo("creating thread %d.", last_tid + 1);
 
-    TCB_t *thr;
+    int tid = ++last_tid;
+    floginfo("initializing TCB %d", tid);
+    TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
+    //int ss_size = SIGSTKSZ;
+    //char stack[ss_size];
 
-    thr = TCB_init(++last_tid);
-    //makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
-    logdebug("**prematurely setting context just for testing the segfault");
-    logdebug("this shall be removed and left to the dispatcher later**");
-    flogdebug("making context at address %p", &(thr->context));
-    logdebug("calling: makecontext(&(thr->context), say_hey, 0);");
-    makecontext(&(thr->context), say_hey, 0);
-    flogdebug("setting context at address %p", &(thr->context));
-    logdebug("calling: setcontext(&(thr->context))");
-    setcontext(&(thr->context));
+    thr->tid = tid;
+    thr->state = PROCST_APTO;
+    thr->ticket = tid;
+    flogdebug("initializing context at address %p", &(thr->context));
+    if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
+    thr->context.uc_stack.ss_sp = (char*)malloc(SIGSTKSZ);
+    thr->context.uc_stack.ss_size = SIGSTKSZ;
+    flogdebug("stack pointer is %p and stack size is %d", main_t->context.uc_stack.ss_sp, main_t->context.uc_stack.ss_size);
+
+    loginfo("creating terminate context");
+    ucontext_t term_context;
+    //char term_stack[SIGSTKSZ];
+    getcontext(&term_context); //get context template
+    term_context.uc_link=&(main_t->context);
+    term_context.uc_stack.ss_sp=(char*)malloc(SIGSTKSZ);
+    term_context.uc_stack.ss_size=SIGSTKSZ; 
+    makecontext(&(term_context), (void(*)(void))terminate, thr->tid);
+    flogdebug("terminate context : uc_link points at main_context at %p - stack pointer is %p and stack size if %d", term_context.uc_link, term_context.uc_stack.ss_sp, term_context.uc_stack.ss_size);
+    thr->context.uc_link = &term_context;
     
-    /* idea : set uc_link to a context where terminate is called
-     * ucontext_t term_context;
-     * makecontext(&(term_context), terminate, thr->tid)
-     * thr->context.uc_link = term_context
-     */
-
-    thr->context.uc_link = NULL; /* to pre-dispatcher */
+    keepTCB(thr); /* insert in catalog */
     addToApts(thr->tid);
 
     floginfo("created thread %d.", thr->tid);
@@ -387,7 +411,7 @@ int cjoin(int tid) {
                 addToQueue(caller->tid, pcjoinbloq_q); // add to cjoinbloq_q - not sure if needed
                 
                 /* set up waiting pair */
-                WAITPAIR *wp;
+                WAITPAIR *wp = (WAITPAIR*)malloc(sizeof(WAITPAIR));
                 wp->caller = caller->tid;
                 wp->target = target->tid;
                 AppendFila2( pwaitpair, wp); // add pair to queue
@@ -423,9 +447,9 @@ int cjoin(int tid) {
 }
 
 int csem_init(csem_t *sem, int count) {
-    FILA2 bloq;
-    PFILA2 pbloq = &bloq; // ponteiro para fila de TCB bloqueadas
-    
+    //FILA2 bloq;
+    PFILA2 pbloq = (PFILA2)malloc(sizeof(FILA2));
+
     if(CreateFila2(pbloq) != 0) {
         logerror("Fail to create pbloq\n");    
         return -1;
