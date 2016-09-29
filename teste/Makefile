@@ -19,9 +19,12 @@ cwait.out: $(LIB_DIR)/libcthread.a cwait.c
 cjoin.out: $(LIB_DIR)/libcthread.a cjoin.c
 	$(CC) -I $(INC_DIR) -o cjoin.out cjoin.c -L$(LIB_DIR) -lcthread
 
+cidentify.out: $(LIB_DIR)/libcthread.a cidentify.c
+	$(CC) -I $(INC_DIR) -o cidentify.out cidentify.c -L$(LIB_DIR) -lcthread
+
 $(BIN_DIR)/cthread.o: $(SRC_DIR)/cthread.c
 	$(CC) -I $(INC_DIR) -c $(SRC_DIR)/cthread.c -o $(BIN_DIR)/cthread.o
 
 .PHONY: clean
 clean:
-	rm -rf $(LIB_DIR)/libcthread.a no_block.out cwait.out cjoin.out $(BIN_DIR)/cthread.o
+	rm -rf $(LIB_DIR)/libcthread.a no_block.out cwait.out cjoin.out cidentify.out $(BIN_DIR)/cthread.o
