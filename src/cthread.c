@@ -7,19 +7,23 @@
 #include "cthread.h"
 
 #undef LOGLEVEL
-#define LOGLEVEL 5
+#define LOGLEVEL 4
 
 #define MAXTHREADS 50
+#define MAXTICKET 255
+#define THR_STACKSZ 50*1024
 
 FILA2 apts_q;
 PFILA2 papts_q;
 FILA2 wait_q; // queue for thread being waited for other threads
-PFILA2 pwait_q; 
+PFILA2 pwait_q;
 FILA2 waitpair;
 PFILA2 pwaitpair;
 FILA2 cjoinbloq_q;
 PFILA2 pcjoinbloq_q;
 TCB_t *getTCB(int tid);
+
+static void terminated(void);
 
 /***** utils */
 
@@ -38,7 +42,7 @@ static void printApts() {
     loginfo("apts queue:");
     FirstFila2(papts_q);
     while((tcb_p = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
-        floginfo("- %d", tcb_p->tid);
+		printTCB(*tcb_p);
         NextFila2(papts_q);
     }
 }
@@ -57,6 +61,8 @@ static void printTCB_tid(int tid) {
 static TCB_t *threads[MAXTHREADS];
 static char valid_threads[MAXTHREADS];
 static int executing_now;
+static ucontext_t terminated_context;
+static char terminated_stack[THR_STACKSZ];
 
 /* initializes the whole thread system. shouldn't be called more than
    once */
@@ -76,13 +82,20 @@ void initAll(void) {
     loginfo("creating waitpair queue");
     pwaitpair = &waitpair;
     CreateFila2(pwaitpair);
-    
+
     loginfo("creating cjoinbloq queue");
     pcjoinbloq_q = &cjoinbloq_q;
     CreateFila2(pcjoinbloq_q);
-    
+
     loginfo("setting main to executing: ");
     executing_now = 0;
+
+	loginfo("making terminated context");
+	getcontext(&terminated_context);
+	terminated_context.uc_stack.ss_sp = terminated_stack;
+	terminated_context.uc_stack.ss_size = THR_STACKSZ;
+	terminated_context.uc_link = NULL;
+	makecontext(&terminated_context, (void (*)(void))terminated, 0);
 }
 
 /* return a pointer to the TCB with that tid */
@@ -110,31 +123,45 @@ static void keepTCB(TCB_t *tcb) {
     threads[tcb->tid] = tcb;
 }
 
-/* find and return the address of the TCB with tid closest to the one given.
-   if two tids are equaly close, returns the smallest of them. should never
-   return NULL, for at least the main thread exist. */
-static TCB_t *getClosestTCB(int tid) {
-    int r = 0; /* radius */
-    int i = tid;
-    TCB_t *tcb = NULL;
+static void removeTCB(TCB_t *tcb) {
+	floginfo("removing TCB %d", tcb->tid);
 
-    while (tcb == NULL) {
-        int minor, major;
-        /* watch for limits */
-        minor = (i - r < 0) ? 0 : i - r;
-        major = (i + r > MAXTHREADS) ? MAXTHREADS : i + r;
+	if (valid_threads[tcb->tid] == 0) {
+		flogdebug("TCB %d is invalid");
+	} else {
+		valid_threads[tcb->tid] = 0;
+		flogdebug("freeing TCB %d stack at %p", tcb->tid, tcb->context.uc_stack.ss_sp);
+		free(tcb->context.uc_stack.ss_sp);
+		free(threads[tcb->tid]);
+	}
+}
 
-        /* smaller has preference */
-        if (valid_threads[minor]) {
-            tcb = getTCB(minor);
-        } else if (valid_threads[major]) {
-            tcb = getTCB(major);
-        }
+/* find and return the address of the TCB with ticket closest to the one given.
+   if two tickets are equaly close, return the TCB with the smallest tid.
+   should never return NULL, for at least the main thread exist. */
+static TCB_t *getClosestTCB(int ticket) {
+	floginfo("selecting thread by ticket. lucky number: %d", ticket);
 
-        r++;
+	int closest = MAXTICKET + 1;
+	TCB_t *chosen = NULL;
+	TCB_t *it;
+	FirstFila2(papts_q);
+	while ((it = (TCB_t *)GetAtIteratorFila2(papts_q)) != NULL) {
+		int curr_dst = abs(it->ticket - ticket);
+		if (curr_dst < closest) {
+			flogdebug("closest is now ticket %d", it->ticket);
+			chosen = it;
+			closest = curr_dst;
+		} else if (curr_dst == closest) {
+			chosen = (chosen->tid < it->tid) ? chosen : it;
+		}
+
+		NextFila2(papts_q);
     }
 
-    return tcb;
+	floginfo("closest was thread %d with ticket %d", chosen->tid, chosen->ticket);
+
+    return chosen;
 }
 
 static void addToApts(int tid) {
@@ -191,7 +218,7 @@ static int searchQueue(int tid, PFILA2 pqueue) {
             NextFila2(pqueue);
         }
     }
-    
+
     flogerror("%d was not found", tid);
     return -1;
 }
@@ -223,7 +250,7 @@ WAITPAIR *getWaitPair(int tid, PFILA2 pairq) {
             NextFila2(pairq);
         }
     }
-    
+
     return NULL;
 }
 
@@ -233,17 +260,18 @@ WAITPAIR *getWaitPair(int tid, PFILA2 pairq) {
 static TCB_t *TCB_init(int tid) {
     floginfo("initializing TCB %d", tid);
     TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
-    int ss_size = SIGSTKSZ;
-    char stack[ss_size];
+    int ss_size = THR_STACKSZ;
+    char *stack = (char *)malloc(ss_size);
 
     thr->tid = tid;
     thr->state = PROCST_APTO;
-    thr->ticket = tid;
+    thr->ticket = Random2()%MAXTICKET;
     flogdebug("initializing context at address %p", &(thr->context));
     if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
     thr->context.uc_stack.ss_sp = stack;
     thr->context.uc_stack.ss_size = ss_size;
+	thr->context.uc_link = &terminated_context;
 
     keepTCB(thr); /* insert in catalog */
 
@@ -257,8 +285,7 @@ static void run_thread(void *(*start)(void *), void *arg) {
 }
 
 static void dispatcher(void) {
-    int lucky = Random2()%MAXTHREADS; // THIS NEEDS TO BE CHANGED
-    floginfo("closest to %d will be selected for dispatch", lucky);
+    int lucky = Random2()%MAXTICKET;
     TCB_t *tcb = getClosestTCB(lucky);
     removeFromApts(tcb->tid);
     executing_now = tcb->tid;
@@ -267,40 +294,10 @@ static void dispatcher(void) {
     setcontext(&(tcb->context));
 }
 
-static void terminate(int tid) {
-    /* does a bucnh of stuff 
-     *
-     * will be linked from makecontext to uc_link during tcb creation
-     * tid is the terminating thread tid
-     *
-     * TODO: remove tid entry from threads and valid_threads
-     */   
-    
-    WAITPAIR *curr;
-    // search waitpair queue for thread that is terminating
-    if( (curr = getWaitPair(tid, pwaitpair)) != NULL ) {    
-        int caller_tid;
-        TCB_t *caller;
-        
-        caller_tid = curr->caller;
-        // remove entry from waitpair queue
-        removeFromPairQueue(tid, pwaitpair);
-        // remove thread that is waiting from wait queue, cjoinbloq
-        removeFromQueue(caller_tid, pcjoinbloq_q);
-        removeFromQueue(caller_tid, pwait_q);
-        caller = getTCB(caller_tid);
-        caller->state=1; // set to executing
-        // set context to this thread
-        setcontext(&(caller->context));
-        } else {
-            // if terminating thread is not being waited, call dispatcher
-            dispatcher();
-        }
-
-}
-
-static void say_hey(void) {
-    loginfo("hey");
+static void terminated(void) {
+	floginfo("thread %d terminated", executing_now);
+	removeTCB(getTCB(executing_now));
+	dispatcher();
 }
 
 
@@ -312,65 +309,24 @@ static void say_hey(void) {
 int ccreate (void* (*start)(void*), void *arg) {
     static int last_tid = -1;
 
-    /* check for main */
-    TCB_t *main_t;
     if (last_tid == -1) {
         initAll();
         floginfo("creating thread %d.", last_tid + 1);
 
-        int tid = ++last_tid;
-        floginfo("initializing TCB %d", tid);
-        main_t = (TCB_t *)malloc(sizeof(TCB_t));
-        int ss_size = SIGSTKSZ;
-        //char stack[ss_size];
+		TCB_t *main_t;
 
-        main_t->tid = tid;
-        main_t->state = PROCST_APTO;
-        main_t->ticket = tid;
-        flogdebug("initializing context at address %p", &(main_t->context));
-        if (getcontext(&(main_t->context)) == -1) logerror("error initializing context");
-        main_t->context.uc_stack.ss_sp = (char*)malloc(SIGSTKSZ);
-        main_t->context.uc_stack.ss_size = SIGSTKSZ;
-        flogdebug("stack pointer is %p and stack size is %d", main_t->context.uc_stack.ss_sp, main_t->context.uc_stack.ss_size);
-        
-        main_t->state = PROCST_EXEC;
-        main_t->context.uc_link = NULL;
+		main_t = TCB_init(++last_tid);
 
-        keepTCB(main_t); /* insert in catalog */
-        
         floginfo("created thread %d.", main_t->tid);
         printTCB(*main_t);
     }
 
     floginfo("creating thread %d.", last_tid + 1);
 
-    int tid = ++last_tid;
-    floginfo("initializing TCB %d", tid);
-    TCB_t *thr = (TCB_t *)malloc(sizeof(TCB_t));
-    //int ss_size = SIGSTKSZ;
-    //char stack[ss_size];
+    TCB_t *thr;
 
-    thr->tid = tid;
-    thr->state = PROCST_APTO;
-    thr->ticket = tid;
-    flogdebug("initializing context at address %p", &(thr->context));
-    if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
-    thr->context.uc_stack.ss_sp = (char*)malloc(SIGSTKSZ);
-    thr->context.uc_stack.ss_size = SIGSTKSZ;
-    flogdebug("stack pointer is %p and stack size is %d", thr->context.uc_stack.ss_sp, thr->context.uc_stack.ss_size);
-
-    loginfo("creating terminate context");
-    ucontext_t *term_context = (ucontext_t*)malloc(sizeof(ucontext_t));
-    //char term_stack[SIGSTKSZ];
-    getcontext(term_context); //get context template
-    term_context->uc_link=&(main_t->context);
-    term_context->uc_stack.ss_sp=(char*)malloc(SIGSTKSZ);
-    term_context->uc_stack.ss_size=SIGSTKSZ; 
-    makecontext(term_context, (void(*)(void))terminate, thr->tid);
-    flogdebug("terminate context : uc_link points at main_context at %p - stack pointer is %p and stack size if %d", term_context->uc_link, term_context->uc_stack.ss_sp, term_context->uc_stack.ss_size);
-    thr->context.uc_link = term_context;
-    
-    keepTCB(thr); /* insert in catalog */
+    thr = TCB_init(++last_tid);
+    makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
     addToApts(thr->tid);
 
     floginfo("created thread %d.", thr->tid);
@@ -397,7 +353,7 @@ int cyield(void) {
 
 int cjoin(int tid) {
     TCB_t *target;
-    
+
     // checks if tid is a valid_thread
     if( (target = getTCB( tid ))) {
         // checks if target_tcb is not finished (status!=4)
@@ -409,25 +365,25 @@ int cjoin(int tid) {
                 caller = getTCB(executing_now); // get caller tcb
                 caller->state = 3; // change state to blocked
                 addToQueue(caller->tid, pcjoinbloq_q); // add to cjoinbloq_q - not sure if needed
-                
+
                 /* set up waiting pair */
                 WAITPAIR *wp = (WAITPAIR*)malloc(sizeof(WAITPAIR));
                 wp->caller = caller->tid;
                 wp->target = target->tid;
                 AppendFila2( pwaitpair, wp); // add pair to queue
-                
+
                 int dispatched = 0;
                 getcontext(&(caller->context));
-                
+
                 if(!dispatched) {
                     dispatched = 1;
                     dispatcher();
                 }
-    
+
                 /* when this context is set again and target is finished */
                 caller->state = 1; // change caller state to ready
-                removeFromQueue(caller->tid, pcjoinbloq_q); 
-                addToQueue(caller->tid, papts_q); 
+                removeFromQueue(caller->tid, pcjoinbloq_q);
+                addToQueue(caller->tid, papts_q);
                 //removeFromQueue(target->tid, pwait_q); -> target is remove at terminate()
 
                 return 0;
@@ -435,11 +391,11 @@ int cjoin(int tid) {
             } else {
                 flogerror("%d is already being waited, can't call cjoin", tid);
                 return -1;
-            }       
+            }
         } else {
             flogerror("%d is finished, can't call cjoin", tid);
             return -1;
-        }    
+        }
     } else {
         flogerror("%d is not a valid tcb, can't call cjoin", tid);
         return -1;
@@ -451,44 +407,44 @@ int csem_init(csem_t *sem, int count) {
     PFILA2 pbloq = (PFILA2)malloc(sizeof(FILA2));
 
     if(CreateFila2(pbloq) != 0) {
-        logerror("Fail to create pbloq\n");    
+        logerror("Fail to create pbloq\n");
         return -1;
     }
 
     sem->count = count;
-    sem->fila = pbloq;    
+    sem->fila = pbloq;
     floginfo("Succesfully created csem with count: %d\n", sem->count);
 
     return 0;
 }
 
-int cwait(csem_t *sem) { 
+int cwait(csem_t *sem) {
     if(sem->count <= 0) {
         // acessa TCB que chamou cwait
         TCB_t *waiting_tcb;
         waiting_tcb = getTCB( executing_now );
         // altera state da TCB=3
-        waiting_tcb->state = 3;       
+        waiting_tcb->state = 3;
         // adiciona TCB a sem->fila
         AppendFila2( sem->fila, waiting_tcb );
     }
     sem->count--;
-    
+
     return 0;
 }
 
 int csignal(csem_t *sem) {
     sem->count++;
-    
+
     // acessa o primeiro da fila de bloqueados
     FirstFila2( sem->fila );
     TCB_t  *unblocked_tcb;
-    
+
     if( (unblocked_tcb = (TCB_t*)GetAtIteratorFila2( sem->fila )) ){
         DeleteAtIteratorFila2( sem->fila ); // remove primeiro bloqueado
         unblocked_tcb->state = 1; // muda status para apto
         AppendFila2( papts_q, unblocked_tcb ); // acrescenta em aptos
-        
+
         return 0;
     }
 
