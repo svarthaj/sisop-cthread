@@ -8,26 +8,33 @@
 #  1. Cuidado com a regra "clean" para não apagar o "fila2.o"
 #
 # OBSERVAR que as variáveis de ambiente consideram que o Makefile está no diretótio "cthread"
-# 
+#
 
-CC=gcc
+CC=gcc -Wall
 LIB_DIR=./lib
 INC_DIR=./include
 BIN_DIR=./bin
 SRC_DIR=./src
+TST_DIR=./testes
 
-all: regra1 regra2 regran
+.PHONY: all
+all: $(LIB_DIR)/libcthread.a
 
-regra1: #dependências para a regra1
-	$(CC) -o $(BIN_DIR)regra1 $(SRC_DIR)regra1.c -Wall
+$(LIB_DIR)/libcthread.a: $(BIN_DIR)/cthread.o
+	ar -cvq $(LIB_DIR)/libcthread.a $(BIN_DIR)/cthread.o $(BIN_DIR)/support.o
 
-regra2: #dependências para a regra2
-	$(CC) -o $(BIN_DIR)regra2 $(SRC_DIR)regra2.c -Wall
+$(BIN_DIR)/no_block.out: $(LIB_DIR)/libcthread.a
+	$(CC) -I $(INC_DIR) -o $(BIN_DIR)/no_block.out $(TST_DIR)/no_block.c -L$(LIB_DIR) -lcthread
 
-regran: #dependências para a regran
-	$(CC) -o $(BIN_DIR)regran $(SRC_DIR)regran.c -Wall
+$(BIN_DIR)/cwait.out: $(LIB_DIR)/libcthread.a
+	$(CC) -I $(INC_DIR) -o $(BIN_DIR)/cwait.out $(TST_DIR)/cwait.c -L$(LIB_DIR) -lcthread
 
+$(BIN_DIR)/cjoin.out: $(LIB_DIR)/libcthread.a
+	$(CC) -I $(INC_DIR) -o $(BIN_DIR)/cjoin.out $(TST_DIR)/cjoin.c -L$(LIB_DIR) -lcthread
+
+$(BIN_DIR)/cthread.o: $(SRC_DIR)/cthread.c
+	$(CC) -I $(INC_DIR) -c $(SRC_DIR)/cthread.c -o $(BIN_DIR)/cthread.o
+
+.PHONY: clean
 clean:
-	rm -rf $(LIB_DIR)/*.a $(BIN_DIR)/*.o $(SRC_DIR)/*~ $(INC_DIR)/*~ *~
-
-
+	rm -rf $(BIN_DIR)/no_block.out $(BIN_DIR)/cwait.out $(BIN_DIR)/cjoin.out $(BIN_DIR)/cthread.o $(LIB_DIR)/libcthread.a
