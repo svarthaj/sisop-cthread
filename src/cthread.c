@@ -296,8 +296,28 @@ static void dispatcher(void) {
 
 static void terminated(void) {
 	floginfo("thread %d terminated", executing_now);
-	removeTCB(getTCB(executing_now));
-	dispatcher();
+	
+    WAITPAIR *curr;
+    if((curr = getWaitPair(executing_now, pwaitpair)) != NULL) {
+        int caller_tid;
+        TCB_t *caller;
+        caller_tid = curr->caller;
+        // remove entry from waitpair queue
+        removeFromPairQueue(executing_now, pwaitpair);
+        // remove thread that is waiting from waitqueue and cjoinbloq
+        removeFromQueue(caller_tid, pwait_q);
+        removeFromQueue(caller_tid, pcjoinbloq_q);
+        // remove terminating TCB from catallog
+        removeTCB(getTCB(executing_now));
+        // set context to waiting TCB
+        caller = getTCB(caller_tid);
+        caller->state = 1; // set to executing
+        setcontext(&(caller->context));
+    } else {    
+        // if terminating thread is not being waited, just removes it and call dispatcher
+        removeTCB(getTCB(executing_now));
+	    dispatcher();
+    }
 }
 
 
