@@ -32,8 +32,6 @@ void *thr2(void *arg) {
 }
 
 void *thr3(void *wait_for) {
-	int i;
-
 	puts("3 will wait for 2");
 	cjoin(*(int *)wait_for);
 	puts("3 will run now");
