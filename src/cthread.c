@@ -357,18 +357,18 @@ int ccreate (void* (*start)(void*), void *arg) {
     if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
     thr->context.uc_stack.ss_sp = (char*)malloc(SIGSTKSZ);
     thr->context.uc_stack.ss_size = SIGSTKSZ;
-    flogdebug("stack pointer is %p and stack size is %d", main_t->context.uc_stack.ss_sp, main_t->context.uc_stack.ss_size);
+    flogdebug("stack pointer is %p and stack size is %d", thr->context.uc_stack.ss_sp, thr->context.uc_stack.ss_size);
 
     loginfo("creating terminate context");
-    ucontext_t term_context;
+    ucontext_t *term_context = (ucontext_t*)malloc(sizeof(ucontext_t));
     //char term_stack[SIGSTKSZ];
-    getcontext(&term_context); //get context template
-    term_context.uc_link=&(main_t->context);
-    term_context.uc_stack.ss_sp=(char*)malloc(SIGSTKSZ);
-    term_context.uc_stack.ss_size=SIGSTKSZ; 
-    makecontext(&(term_context), (void(*)(void))terminate, thr->tid);
-    flogdebug("terminate context : uc_link points at main_context at %p - stack pointer is %p and stack size if %d", term_context.uc_link, term_context.uc_stack.ss_sp, term_context.uc_stack.ss_size);
-    thr->context.uc_link = &term_context;
+    getcontext(term_context); //get context template
+    term_context->uc_link=&(main_t->context);
+    term_context->uc_stack.ss_sp=(char*)malloc(SIGSTKSZ);
+    term_context->uc_stack.ss_size=SIGSTKSZ; 
+    makecontext(term_context, (void(*)(void))terminate, thr->tid);
+    flogdebug("terminate context : uc_link points at main_context at %p - stack pointer is %p and stack size if %d", term_context->uc_link, term_context->uc_stack.ss_sp, term_context->uc_stack.ss_size);
+    thr->context.uc_link = term_context;
     
     keepTCB(thr); /* insert in catalog */
     addToApts(thr->tid);
