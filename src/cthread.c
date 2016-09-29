@@ -8,7 +8,7 @@
 #include "cthread.h"
 
 int cidentify(char *name, int size) {
-	strncpy(name, "Lucas Leal (206438) e Luis Mollmann (206440)", size);
+	strncpy(name, "Lucas Leal (206438)\nLuis Mollmann (206440)", size);
 	return 0;
 }
 
@@ -28,6 +28,12 @@ PFILA2 papts_q;
 
 FILA2 join_q;
 PFILA2 pjoin_q;
+
+FILA2 threads_q;
+PFILA2 pthreads_q;
+
+FILA2 valid_thr_q;
+PFILA2 pvalid_thr_q;
 
 TCB_t *getTCB(int tid);
 
@@ -73,8 +79,8 @@ static void printJoin() {
 /***** catalogging */
 
 /* temporary TCB 'tree' */
-static TCB_t *threads[THR_MAXTHREADS];
-static char valid_threads[THR_MAXTHREADS];
+//static TCB_t *threads[THR_MAXTHREADS];
+//static char valid_threads[THR_MAXTHREADS];
 static int executing_now;
 static ucontext_t terminate_context;
 static char terminate_stack[THR_STACKSZ];
@@ -84,7 +90,7 @@ static char terminate_stack[THR_STACKSZ];
 void initAll(void) {
     logdebug("initializing everything");
     int i;
-    for (i = 0; i < THR_MAXTHREADS; i++) valid_threads[i] = 0;
+    //for (i = 0; i < THR_MAXTHREADS; i++) valid_threads[i] = 0;
 
     logdebug("creating apt queue");
     papts_q = &apts_q;
@@ -93,6 +99,14 @@ void initAll(void) {
     logdebug("creating join queue");
     pjoin_q = &join_q;
     CreateFila2(pjoin_q);
+    
+    logdebug("creating threads queue");
+    pthreads_q = &threads_q;
+    CreateFila2(pthreads_q);
+    
+    logdebug("creating valid_threads queue");
+    pvalid_thr_q = &valid_thr_q;
+    CreateFila2(pvalid_thr_q);
 
     logdebug("setting main to executing: ");
     executing_now = 0;
@@ -104,39 +118,85 @@ void initAll(void) {
 	makecontext(&terminate_context, terminate, 0);
 }
 
+/* add tcb to threads queue */
+static void addToThreads(TCB_t *thr) {
+    flogdebug("adding %d to threads", thr->tid);
+	//TCB_t *thr = getTCB(tid);
+    AppendFila2(pthreads_q, thr);
+}
+
+/* remove tcb from threads queue */
+static void removeFromThreads(int tid) {
+    flogdebug("removing %d from threads", tid);
+    FirstFila2(pthreads_q);
+
+    TCB_t *curr; /* current */
+    while ((curr = (TCB_t *)GetAtIteratorFila2(pthreads_q)) != NULL) {
+        if (curr->tid == tid) {
+            DeleteAtIteratorFila2(pthreads_q);
+            break;
+        } else {
+            NextFila2(pthreads_q);
+        }
+    }
+}
+
+/* search for tid in threads queue */
+static int is_valid_thread(int tid) {
+    TCB_t *it;
+    FirstFila2(pthreads_q);
+    while ( (it = (TCB_t*)GetAtIteratorFila2(pthreads_q)) != NULL) {
+        if(it->tid == tid) {
+            return THR_SUCCESS;
+        } else {
+            NextFila2(pthreads_q);
+        }
+    }
+    return THR_ERROR;
+}
+
 /* return a pointer to the TCB with that tid */
 TCB_t *getTCB(int tid) {
-    if (tid > THR_MAXTHREADS || !valid_threads[tid]) {
-        flogerror("Tried to access invalid thread %d", tid);
+    TCB_t *it;
+    FirstFila2(pthreads_q);
+    while( (it = (TCB_t*)GetAtIteratorFila2(pthreads_q)) != NULL ) {
+        if(it->tid == tid) {
+            return it;
+        } else {
+            NextFila2(pthreads_q);
+        }
     }
+    
+    flogerror("Tried to access invalid thread %d", tid);
 
-    return threads[tid];
+    return NULL;        
 }
 
 /* put tcb in catalog */
 static void keepTCB(TCB_t *tcb) {
     flogdebug("keeping TCB %d", tcb->tid);
 
-    if (valid_threads[tcb->tid] == 1) {
+    if (is_valid_thread(tcb->tid) == THR_SUCCESS) {
         flogwarning("replacing TCB %d", tcb->tid);
         free(tcb->context.uc_stack.ss_sp);
-        free(threads[tcb->tid]);
+        //free(threads[tcb->tid]);
     }
 
-    valid_threads[tcb->tid] = 1;
-    threads[tcb->tid] = tcb;
+    //valid_threads[tcb->tid] = 1;
+    addToThreads(tcb);
 }
 
 static void removeTCB(TCB_t *tcb) {
 	flogdebug("removing TCB %d", tcb->tid);
 
-	if (valid_threads[tcb->tid] == 0) {
+	if (is_valid_thread(tcb->tid) == THR_ERROR) {
 		flogwarning("TCB %d is invalid");
 	} else {
-		valid_threads[tcb->tid] = 0;
+		//valid_threads[tcb->tid] = 0;
 		flogdebug("freeing TCB %d stack at %p", tcb->tid, tcb->context.uc_stack.ss_sp);
 		free(tcb->context.uc_stack.ss_sp);
-		free(threads[tcb->tid]);
+		removeFromThreads(tcb->tid);
+        //free(threads[tcb->tid]);
 	}
 }
 
@@ -273,8 +333,8 @@ static void dispatcher(void) {
 	printJoin();
 
 	int lucky = Random2()%THR_MAXTICKET;
-    //TCB_t *tcb = getClosestTCB(lucky);
-	TCB_t *tcb = getNextTCB();
+    TCB_t *tcb = getClosestTCB(lucky);
+	//TCB_t *tcb = getNextTCB();
     removeFromApts(tcb->tid);
     executing_now = tcb->tid;
     floginfo("dispatching %d", tcb->tid);
@@ -357,7 +417,7 @@ int cjoin(int tid) {
 	int been_here = 0;
 
 	/* check if someone else is not waiting */
-	if (findWaitingFor(tid) >= 0 || !valid_threads[tid]) {
+	if (findWaitingFor(tid) >= 0 || is_valid_thread(tid)) {
 		return THR_ERROR;
 	}
 
@@ -409,9 +469,14 @@ int csignal(csem_t *sem) {
 	if (sem->count >= 0) {
 		floginfo("%d released a resource", executing_now);
 		FirstFila2(sem->fila);
-		TCB_t *first = (TCB_t *)GetAtIteratorFila2(sem->fila);
-		DeleteAtIteratorFila2(sem->fila);
-		addToApts(first->tid);
+		TCB_t *first; 
+        if( (first = (TCB_t *)GetAtIteratorFila2(sem->fila)) != NULL) {
+		    DeleteAtIteratorFila2(sem->fila);
+		    addToApts(first->tid);
+        } else {
+            loginfo("Nobody waits for this resource");
+            return THR_ERROR;
+        }
 	}
 
 	return THR_SUCCESS;
