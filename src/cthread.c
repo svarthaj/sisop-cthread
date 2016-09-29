@@ -116,6 +116,11 @@ static void removeTCB(TCB_t *tcb) {
 	}
 }
 
+static TCB_t *getNextTCB() {
+	FirstFila2(papts_q);
+	return (TCB_t *)GetAtIteratorFila2(papts_q);
+}
+
 /* find and return the address of the TCB with ticket closest to the one given.
    if two tickets are equaly close, return the TCB with the smallest tid.
    should never return NULL, for at least the main thread exist. */
@@ -200,8 +205,9 @@ static void run_thread(void *(*start)(void *), void *arg) {
 }
 
 static void dispatcher(void) {
-    int lucky = Random2()%MAXTICKET;
-    TCB_t *tcb = getClosestTCB(lucky);
+	int lucky = Random2()%MAXTICKET;
+    //TCB_t *tcb = getClosestTCB(lucky);
+	TCB_t *tcb = getNextTCB();
     removeFromApts(tcb->tid);
     executing_now = tcb->tid;
     floginfo("dispatching %d", tcb->tid);
