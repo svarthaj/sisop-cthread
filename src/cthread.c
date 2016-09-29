@@ -39,6 +39,10 @@ TCB_t *getTCB(int tid);
 
 static void terminate(void);
 
+static int executing_now;
+static ucontext_t terminate_context;
+static char terminate_stack[THR_STACKSZ];
+
 /***** utils */
 
 /* logs a TCB */
@@ -73,6 +77,17 @@ static void printJoin() {
     }
 }
 
+static int error(const char *msg) {
+	logerror(msg);
+	logerror("system state:");
+	logerror("excuting now is:");
+	printTCB(*getTCB(executing_now));
+	printApts();
+	printJoin();
+
+	return THR_ERROR;
+}
+
 
 
 
@@ -81,41 +96,55 @@ static void printJoin() {
 /* temporary TCB 'tree' */
 //static TCB_t *threads[THR_MAXTHREADS];
 //static char valid_threads[THR_MAXTHREADS];
-static int executing_now;
-static ucontext_t terminate_context;
-static char terminate_stack[THR_STACKSZ];
+
+static int initFila(PFILA2 fila) {
+	if (CreateFila2(fila) != 0) {
+		return error("initFila() failed");
+	} else {
+		return THR_SUCCESS;
+	}
+}
+
+static int initContext(ucontext_t *context, char *stack, int stack_size) {
+	if (getcontext(context) == -1) {
+		return error("failed in initContext()");
+	}
+
+	context->uc_stack.ss_sp = stack;
+	context->uc_stack.ss_size = stack_size;
+	return THR_SUCCESS;
+}
 
 /* initializes the whole thread system. shouldn't be called more than
    once */
-void initAll(void) {
+static int initAll(void) {
     logdebug("initializing everything");
-    int i;
-    //for (i = 0; i < THR_MAXTHREADS; i++) valid_threads[i] = 0;
 
     logdebug("creating apt queue");
     papts_q = &apts_q;
-    CreateFila2(papts_q);
+    if (initFila(papts_q) == THR_ERROR) return THR_ERROR;
 
     logdebug("creating join queue");
     pjoin_q = &join_q;
-    CreateFila2(pjoin_q);
-    
+    if (initFila(pjoin_q) == THR_ERROR) return THR_ERROR;
+
     logdebug("creating threads queue");
     pthreads_q = &threads_q;
-    CreateFila2(pthreads_q);
-    
+    if (initFila(pthreads_q) == THR_ERROR) return THR_ERROR;
+
     logdebug("creating valid_threads queue");
     pvalid_thr_q = &valid_thr_q;
-    CreateFila2(pvalid_thr_q);
+    if (initFila(pvalid_thr_q) == THR_ERROR) return THR_ERROR;
 
     logdebug("setting main to executing: ");
     executing_now = 0;
 
 	logdebug("making terminate context");
-	getcontext(&terminate_context);
-	terminate_context.uc_stack.ss_sp = terminate_stack;
-	terminate_context.uc_stack.ss_size = THR_STACKSZ;
+	if (initContext(&terminate_context, terminate_stack, THR_STACKSZ) == THR_ERROR)
+		return THR_ERROR;
 	makecontext(&terminate_context, terminate, 0);
+
+	return THR_SUCCESS;
 }
 
 /* add tcb to threads queue */
@@ -166,10 +195,10 @@ TCB_t *getTCB(int tid) {
             NextFila2(pthreads_q);
         }
     }
-    
+
     flogerror("Tried to access invalid thread %d", tid);
 
-    return NULL;        
+    return NULL;
 }
 
 /* put tcb in catalog */
@@ -239,13 +268,20 @@ static void addToApts(int tid) {
     AppendFila2(papts_q, thr);
 }
 
-static void addToJoin(int waiting, int waited) {
+static int addToJoin(int waiting, int waited) {
 	flogdebug("adding (%d, %d) to join queue", waiting, waited);
 	struct join_pair *pair = (struct join_pair *)malloc(sizeof(struct join_pair));
+
+	if (pair == NULL) {
+		return error("malloc on addToJoin()");
+	}
+
 	pair->waiting = getTCB(waiting);
 	pair->waiting->state = PROCST_BLOQ;
 	pair->waited = getTCB(waited);
 	AppendFila2(pjoin_q, pair);
+
+	return THR_SUCCESS;
 }
 
 static void removeFromApts(int tid) {
@@ -305,15 +341,18 @@ static TCB_t *TCB_init(int tid) {
     int ss_size = THR_STACKSZ;
     char *stack = (char *)malloc(ss_size);
 
+	if (thr == NULL || stack == NULL) {
+		error("malloc error on TCB_init()");
+		return NULL;
+	}
+
     thr->tid = tid;
     thr->state = PROCST_APTO;
     thr->ticket = Random2()%THR_MAXTICKET;
     flogdebug("initializing context at address %p", &(thr->context));
     if (getcontext(&(thr->context)) == -1) logerror("error initializing context");
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
-    thr->context.uc_stack.ss_sp = stack;
-    thr->context.uc_stack.ss_size = ss_size;
-	thr->context.uc_link = &terminate_context;
+	if (initContext(&(thr->context), stack, ss_size) == THR_ERROR) return NULL;
 
     keepTCB(thr); /* insert in catalog */
 
@@ -401,7 +440,9 @@ int cyield(void) {
     TCB_t *caller;
     caller = getTCB(executing_now);
     floginfo("thread %d is yielding control", caller->tid);
-    getcontext(&(caller->context));
+    if (getcontext(&(caller->context)) == -1) {
+		return error("error getting context in cyield()");
+	}
 
     if (!been_here) {
         been_here = 1;
@@ -424,12 +465,14 @@ int cjoin(int tid) {
 	TCB_t *waiting;
 	waiting = getTCB(executing_now);
 	floginfo("thread %d will wait for thread %d", waiting->tid, tid);
-	getcontext(&(waiting->context));
+    if (getcontext(&(waiting->context)) == -1) {
+		return error("error getting context in cjoin()");
+	}
 
     if (!been_here) {
         been_here = 1;
 
-        addToJoin(waiting->tid, tid);
+        if (addToJoin(waiting->tid, tid) == THR_ERROR) return THR_ERROR;
 
         dispatcher();
     }
@@ -439,6 +482,9 @@ int cjoin(int tid) {
 
 int csem_init(csem_t *sem, int count) {
 	sem->fila = (PFILA2)malloc(sizeof(FILA2));
+	if (sem->fila == NULL) {
+		return error("malloc'ing semaphor queue");
+	}
 	sem->count = count;
 	CreateFila2(sem->fila);
 
@@ -451,7 +497,9 @@ int cwait(csem_t *sem) {
     int been_here = 0;
     TCB_t *caller;
     caller = getTCB(executing_now);
-    getcontext(&(caller->context));
+    if (getcontext(&(caller->context)) == -1) {
+		return error("error getting context in cwait()");
+	}
 
 	if (!been_here && sem->count < 0) {
 		floginfo("%d is waiting for resource", executing_now);
@@ -469,7 +517,7 @@ int csignal(csem_t *sem) {
 	if (sem->count >= 0) {
 		floginfo("%d released a resource", executing_now);
 		FirstFila2(sem->fila);
-		TCB_t *first; 
+		TCB_t *first;
         if( (first = (TCB_t *)GetAtIteratorFila2(sem->fila)) != NULL) {
 		    DeleteAtIteratorFila2(sem->fila);
 		    addToApts(first->tid);
