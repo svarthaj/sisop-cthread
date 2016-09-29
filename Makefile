@@ -15,7 +15,7 @@ LIB_DIR=./lib
 INC_DIR=./include
 BIN_DIR=./bin
 SRC_DIR=./src
-TST_DIR=./testes
+TST_DIR=./teste
 
 .PHONY: all
 all: $(LIB_DIR)/libcthread.a

@@ -253,6 +253,7 @@ static TCB_t *TCB_init(int tid) {
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
     thr->context.uc_stack.ss_sp = stack;
     thr->context.uc_stack.ss_size = ss_size;
+	thr->context.uc_link = &terminate_context;
 
     keepTCB(thr); /* insert in catalog */
 
@@ -264,7 +265,6 @@ static void run_thread(void *(*start)(void *), void *arg) {
     flogdebug("thread %d is executing", executing_now);
     start(arg);
 	flogdebug("thread %d finished executing");
-	terminate();
 }
 
 static void dispatcher(void) {
@@ -373,8 +373,6 @@ int cjoin(int tid) {
 
         dispatcher();
     }
-
-	floginfo("thread %d finished waiting for thread %d", waiting->tid, tid);
 
     return THR_SUCCESS;
 }
