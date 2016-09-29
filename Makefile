@@ -35,6 +35,9 @@ $(BIN_DIR)/cjoin.out: $(LIB_DIR)/libcthread.a
 $(BIN_DIR)/cthread.o: $(SRC_DIR)/cthread.c
 	$(CC) -I $(INC_DIR) -c $(SRC_DIR)/cthread.c -o $(BIN_DIR)/cthread.o
 
+cthread.tar.gz: clean
+	tar -zcvf cthread.tar.gz bin include lib src exemplos teste Makefile relatorio.pdf
+
 .PHONY: clean
 clean:
-	rm -rf $(BIN_DIR)/no_block.out $(BIN_DIR)/cwait.out $(BIN_DIR)/cjoin.out $(BIN_DIR)/cthread.o $(LIB_DIR)/libcthread.a
+	rm -rf $(BIN_DIR)/no_block.out $(BIN_DIR)/cwait.out $(BIN_DIR)/cjoin.out $(BIN_DIR)/cthread.o $(LIB_DIR)/libcthread.a cthread.tar.gz
