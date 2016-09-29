@@ -1,10 +1,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ucontext.h>
+#include <string.h>
 #include "logging.c"
 #include "support.h"
 #include "cdata.h"
 #include "cthread.h"
+
+int cidentify(char *name, int size) {
+	strncpy(name, "Lucas Leal (206438) e Luis Mollmann (206440)", size);
+	return 0;
+}
 
 #define THR_ERROR -1
 #define THR_SUCCESS 0
@@ -59,11 +65,6 @@ static void printJoin() {
 		         pair->waiting->tid, pair->waited->tid);
         NextFila2(pjoin_q);
     }
-}
-
-static void printTCB_tid(int tid) {
-    TCB_t *thr = getTCB(tid);
-    printTCB(*thr);
 }
 
 
