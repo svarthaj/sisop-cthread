@@ -76,7 +76,8 @@ void initAll(void) {
 	getcontext(&terminated_context);
 	terminated_context.uc_stack.ss_sp = terminated_stack;
 	terminated_context.uc_stack.ss_size = THR_STACKSZ;
-	makecontext(&terminated_context, terminated, 0);
+	terminated_context.uc_link = NULL;
+	makecontext(&terminated_context, (void (*)(void))terminated, 0);
 }
 
 /* return a pointer to the TCB with that tid */
@@ -185,6 +186,7 @@ static TCB_t *TCB_init(int tid) {
     flogdebug("stack pointer is %p and stack size is %d", stack, ss_size);
     thr->context.uc_stack.ss_sp = stack;
     thr->context.uc_stack.ss_size = ss_size;
+	thr->context.uc_link = &terminated_context;
 
     keepTCB(thr); /* insert in catalog */
 
@@ -195,8 +197,6 @@ static void run_thread(void *(*start)(void *), void *arg) {
     loginfo("in call start");
     flogdebug("thread %d is executing", executing_now);
     start(arg);
-	flogdebug("thread %d finished executing");
-	terminated();
 }
 
 static void dispatcher(void) {
