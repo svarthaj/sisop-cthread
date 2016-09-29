@@ -7,7 +7,7 @@
 #include "cthread.h"
 
 #undef LOGLEVEL
-#define LOGLEVEL 5
+#define LOGLEVEL 4
 
 #define MAXTHREADS 50
 #define MAXTICKET 255
@@ -16,6 +16,8 @@
 FILA2 apts_q;
 PFILA2 papts_q;
 TCB_t *getTCB(int tid);
+
+static void terminated(void);
 
 /***** utils */
 
@@ -53,6 +55,8 @@ static void printTCB_tid(int tid) {
 static TCB_t *threads[MAXTHREADS];
 static char valid_threads[MAXTHREADS];
 static int executing_now;
+static ucontext_t terminated_context;
+static char terminated_stack[THR_STACKSZ];
 
 /* initializes the whole thread system. shouldn't be called more than
    once */
@@ -67,6 +71,12 @@ void initAll(void) {
 
     loginfo("setting main to executing: ");
     executing_now = 0;
+
+	loginfo("making terminated context");
+	getcontext(&terminated_context);
+	terminated_context.uc_stack.ss_sp = terminated_stack;
+	terminated_context.uc_stack.ss_size = THR_STACKSZ;
+	makecontext(&terminated_context, terminated, 0);
 }
 
 /* return a pointer to the TCB with that tid */
@@ -91,6 +101,19 @@ static void keepTCB(TCB_t *tcb) {
 
     valid_threads[tcb->tid] = 1;
     threads[tcb->tid] = tcb;
+}
+
+static void removeTCB(TCB_t *tcb) {
+	floginfo("removing TCB %d", tcb->tid);
+
+	if (valid_threads[tcb->tid] == 0) {
+		flogdebug("TCB %d is invalid");
+	} else {
+		valid_threads[tcb->tid] = 0;
+		flogdebug("freeing TCB %d stack at %p", tcb->tid, tcb->context.uc_stack.ss_sp);
+		free(tcb->context.uc_stack.ss_sp);
+		free(threads[tcb->tid]);
+	}
 }
 
 /* find and return the address of the TCB with ticket closest to the one given.
@@ -172,6 +195,8 @@ static void run_thread(void *(*start)(void *), void *arg) {
     loginfo("in call start");
     flogdebug("thread %d is executing", executing_now);
     start(arg);
+	flogdebug("thread %d finished executing");
+	terminated();
 }
 
 static void dispatcher(void) {
@@ -182,6 +207,12 @@ static void dispatcher(void) {
     floginfo("dispatching %d", tcb->tid);
     flogdebug("setting context at address %p", &(tcb->context));
     setcontext(&(tcb->context));
+}
+
+static void terminated(void) {
+	floginfo("thread %d terminated", executing_now);
+	removeTCB(getTCB(executing_now));
+	dispatcher();
 }
 
 
@@ -214,7 +245,6 @@ int ccreate (void* (*start)(void*), void *arg) {
 
     thr = TCB_init(++last_tid);
     makecontext(&(thr->context), (void (*)(void))run_thread, 2, start, arg);
-    thr->context.uc_link = NULL; /* to pre-dispatcher */
     addToApts(thr->tid);
 
     floginfo("created thread %d.", thr->tid);
