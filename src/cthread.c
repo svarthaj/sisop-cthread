@@ -15,7 +15,6 @@ int cidentify(char *name, int size)
 
 #define THR_ERROR -1
 #define THR_SUCCESS 0
-#define THR_MAXTHREADS 50
 #define THR_MAXTICKET 255
 #define THR_STACKSZ 50*1024
 
