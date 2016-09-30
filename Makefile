@@ -20,6 +20,15 @@ TST_DIR=./teste
 .PHONY: all
 all: $(LIB_DIR)/libcthread.a
 
+.PHONY: run_tests
+run_tests: $(BIN_DIR)/no_block.out $(BIN_DIR)/cjoin.out $(BIN_DIR)/cwait.out
+	@echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> no_block.out"
+	$(BIN_DIR)/no_block.out
+	@echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> cjoin.out"
+	$(BIN_DIR)/cjoin.out
+	@echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> cwait.out"
+	$(BIN_DIR)/cwait.out
+
 $(LIB_DIR)/libcthread.a: $(BIN_DIR)/cthread.o
 	ar -cvq $(LIB_DIR)/libcthread.a $(BIN_DIR)/cthread.o $(BIN_DIR)/support.o
 

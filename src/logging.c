@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#define LOGLEVEL 6
+#define LOGLEVEL 2
 #define LVL_DEBUG 5
 #define LVL_INFO 4
 #define LVL_WARNING 3
