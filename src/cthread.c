@@ -240,12 +240,6 @@ static void removeTCB(TCB_t * tcb)
 	}
 }
 
-static TCB_t *getNextTCB()
-{
-	FirstFila2(papts_q);
-	return (TCB_t *) GetAtIteratorFila2(papts_q);
-}
-
 /* find and return the address of the TCB with ticket closest to the one given.
    if two tickets are equaly close, return the TCB with the smallest tid.
    should never return NULL, for at least the main thread exist. */
