@@ -3,7 +3,8 @@
 #include "support.h"
 #include "cthread.h"
 
-void *thr1(void *arg) {
+void *thr1(void *arg)
+{
 	int i;
 	if (cjoin(10) < 0) {
 		puts("1 won't wait for 10");
@@ -17,7 +18,8 @@ void *thr1(void *arg) {
 	return NULL;
 }
 
-void *thr2(void *arg) {
+void *thr2(void *arg)
+{
 	int i;
 	if (cjoin(1) < 0) {
 		puts("2 won't wait for 1");
@@ -31,7 +33,8 @@ void *thr2(void *arg) {
 	return NULL;
 }
 
-void *thr3(void *wait_for) {
+void *thr3(void *wait_for)
+{
 	puts("3 will wait for 2");
 	cjoin(*(int *)wait_for);
 	puts("3 will run now");
@@ -40,12 +43,13 @@ void *thr3(void *wait_for) {
 	return NULL;
 }
 
-int main(int argc, char** argv) {
-    int tid1 = ccreate(thr1, NULL);
-    int tid2 = ccreate(thr2, NULL);
-    int tid3 = ccreate(thr3, &tid2);
+int main(int argc, char **argv)
+{
+	int tid1 = ccreate(thr1, NULL);
+	int tid2 = ccreate(thr2, NULL);
+	int tid3 = ccreate(thr3, &tid2);
 	cjoin(tid1);
 	cjoin(tid3);
 	puts("came back from cjoin()'s");
-    return 0;
+	return 0;
 }
